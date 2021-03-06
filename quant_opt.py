@@ -64,7 +64,7 @@ long_windows = [i for i in range(30, 60, 1)]
 windows = [i for i in itertools.product(*[short_windows, long_windows])]
 
 # Initialize
-master = pd.DataFrame()
+ledger = pd.DataFrame()
 balance = 0
 df = pd.DataFrame()
 
@@ -72,7 +72,7 @@ df = pd.DataFrame()
 for ticker in tickers:
     
     stock = stock_dat(ticker, '2000-01-01', '2021-03-02', windows)
-    stock.execute_opt()
+    stock.execute_opt(10000)
     
     balance += stock.res['total'].iloc[-1]
     
@@ -80,7 +80,7 @@ for ticker in tickers:
     print(f'Running balance for portfolio =    ${round(balance, 2)}')
     
     # Update
-    master = master.append(stock.res)
+    ledger = ledger.append(stock.res)
     
     df = df.append(stock.df)
     
@@ -93,7 +93,7 @@ initial_totals = master.groupby(master.index)[['holdings', 'cash', 'total']].agg
     Markowitz Optimization
 '''    
  
-mpt = markowitz_portfolio(data)
+mpt = markowitz_portfolio(df)
 weights = mpt.opt_weights
 
 # Initialize
@@ -113,38 +113,39 @@ for col in cols:
     
     # Update
     shares.append((col, num_shares))
+
+# Perform adjusted backtesting
+mpt_ledger = pd.DataFrame()
+mpt_balance = 0
+
+for info in shares:
     
-# Backtesting
-mpt_res = {}
-
-# Get signals
-positions = pd.DataFrame(index = df.index.drop_duplicates())
-
-for determination in shares:
+    stock = stock_dat(info[0], '2000-01-01', '2021-03-02', windows)
+    stock.execute_opt(info[1])
     
-    positions[determination[0]] = determination[1] * df.loc[df['ticker'] == determination[0]]['signal']
+    mpt_balance += stock.res['total'].iloc[-1]
     
-pos_diff = positions.diff()
-
-# Get prices
-portfolio = pd.DataFrame()
-
-for ticker in tickers:
+    print(f'\nOptima calculated for {info[0]}: ')
+    print(f'Running balance for portfolio =    ${round(mpt_balance, 2)}')
     
-    portfolio[ticker] = positions[ticker].multiply(df.loc[df['ticker'] == ticker]['price'], axis = 0)
-
-    portfolio['holdings'] = (positions.multiply(df.loc[df['ticker'] == ticker]['price'], axis = 0)).sum(axis = 1)
-
-    portfolio['cash'] = investment - (pos_diff.multiply(df.loc[df['ticker'] == ticker]['price'], axis = 0)).sum(axis = 1).cumsum()   
-
-    portfolio['total'] = portfolio['cash'] + portfolio['holdings']
-
-    portfolio['returns'] = portfolio['total'].pct_change()
-
+    # Update
+    mpt_ledger = mpt_ledger.append(stock.res)
+    
 # Coalesce
-mpt_portfolio = portfolio[['holdings', 'cash', 'total', 'returns']]
-mpt_portfolio = mpt_portfolio.groupby(mpt_portfolio.index).agg({'holdings': 'sum',
-                                                                'cash': 'sum',
-                                                                'total': 'sum'})
+mpt_totals = mpt_ledger.groupby(mpt_ledger.index)[['holdings', 'cash', 'total']].agg({'holdings': 'sum',
+                                                                                      'cash': 'sum',
+                                                                                      'total': 'sum'})
+        
+
+
+
+
+
+
+
+
+
+
+
 
     

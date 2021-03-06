@@ -15,19 +15,41 @@ import numpy as np
 import warnings
 warnings.filterwarnings('ignore')
 import itertools
-from scipy.optimize import brute
+from operator import itemgetter
+
+'''
+    Class for calculating trade activities on a given stock
+    --------------------------------------------------------
+    
+    Attributes
+    =========
+    - ticker:
+        symbol
+    - start:
+        date
+    - end:
+        date
+        
+    Methods
+    =======
+    - grab_dat()
+    - calculate_parameters()
+'''
 
 # Class for computing individual stock
 class stock_dat:
     
-    def __init__(self, ticker, start, end):
+    def __init__(self, ticker, start, end, windows):
         
         self.ticker = ticker
         self.start = start
         self.end = end
+        self.windows = windows
         self.df = self.grab_dat()
         self.res = None
-            
+        self.opt = None
+        self.calculate_opt()
+        
     # Function to retrieve data
     def grab_dat(self):
         
@@ -79,16 +101,48 @@ class stock_dat:
         portfolio['holdings'] = (positions.multiply(data['price'], axis = 0)).sum(axis = 1)
         portfolio['cash'] = initial_capital - (pos_diff.multiply(data['price'], axis = 0)).sum(axis = 1).cumsum()   
         portfolio['total'] = portfolio['cash'] + portfolio['holdings']
-        
-        self.res = portfolio 
-        
+                
         return portfolio['total'].iloc[-1]
     
+    # Function to backtest optima
+    def execute_optimal_backtesting(self, initial_capital):
 
-# Execute
-if __name__ == '__main__':
+        data = self.df.copy().dropna()
+                
+        positions = pd.DataFrame(index = data.index)
+        positions[self.ticker] = 1000 * data['signal']
+        
+        portfolio = positions.multiply(data['price'], axis = 0)
+        pos_diff = positions.diff()
+        
+        portfolio['holdings'] = (positions.multiply(data['price'], axis = 0)).sum(axis = 1)
+        portfolio['cash'] = initial_capital - (pos_diff.multiply(data['price'], axis = 0)).sum(axis = 1).cumsum()   
+        portfolio['total'] = portfolio['cash'] + portfolio['holdings']
+                
+        self.res = portfolio
     
-    ticker = stock_dat('BTC-USD', '2000-01-01', '2021-03-02')
-    ticker.calculate_parameters(5, 15)
-    ticker.build_signals()
-    ticker.execute_backtesting(10000)
+    # Function to optimize parameters
+    def calculate_opt(self):
+        
+        scores = []
+
+        for window in self.windows:
+    
+            self.calculate_parameters(window[0], window[1])
+            self.build_signals()
+            self.execute_backtesting(10000)
+    
+            score = self.execute_backtesting(10000)
+    
+            scores.append((window, score))
+    
+        # Retrieve
+        self.opt = max(scores, key = itemgetter(1))[0]
+    
+    # Function to build optima
+    def execute_opt(self, amt):
+        
+        self.calculate_parameters(self.opt[0], self.opt[1])
+        self.build_signals()
+        self.execute_optimal_backtesting(amt)
+
