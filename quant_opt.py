@@ -136,16 +136,11 @@ mpt_totals = mpt_ledger.groupby(mpt_ledger.index)[['holdings', 'cash', 'total']]
                                                                                       'cash': 'sum',
                                                                                       'total': 'sum'})
         
-
-
-
-
-
-
-
-
-
-
-
-
-    
+# Visualize
+fig, ax = plt.subplots(figsize = (10, 6))
+plt.title('Cumulative Returns for Portfolios', fontsize = 12)
+plt.xlabel('Date', fontsize = 12)
+plt.ylabel('Cumulative Portfolio Value ($)', fontsize = 12)
+ax.plot(initial_totals['total'], lw = .5, label = 'Equally-Weighted')
+ax.plot(mpt_totals['total'], lw = .5, label = 'Markowitz')
+fig.legend(loc = 'best', fontsize = 12)
