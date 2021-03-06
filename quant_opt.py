@@ -12,11 +12,11 @@ os.chdir('/Users/operator/Documents/')
 from quantitative_finance_lib import *
 from quant_lib import *
 from pt_lib import *
-from bt_lib import *
 import xgboost as xgb
 import matplotlib.pyplot as plt
 %matplotlib inline
 %config InlineBackend.figure_format = 'retina'
+import numpy as np
 
 # Initialize list of stocks
 tickers = ['AG', 
@@ -85,7 +85,7 @@ for ticker in tickers:
     df = df.append(stock.df)
     
 # Coalesce
-initial_totals = master.groupby(master.index)[['holdings', 'cash', 'total']].agg({'holdings': 'sum',
+initial_totals = ledger.groupby(ledger.index)[['holdings', 'cash', 'total']].agg({'holdings': 'sum',
                                                                                   'cash': 'sum',
                                                                                   'total': 'sum'})
 
@@ -143,4 +143,58 @@ plt.xlabel('Date', fontsize = 12)
 plt.ylabel('Cumulative Portfolio Value ($)', fontsize = 12)
 ax.plot(initial_totals['total'], lw = .5, label = 'Equally-Weighted')
 ax.plot(mpt_totals['total'], lw = .5, label = 'Markowitz')
+fig.legend(loc = 'best', fontsize = 12)
+
+'''
+    MAD Optimization
+'''
+
+mads = []
+mad_balance = 0
+mad_ledger = pd.DataFrame()
+
+for ticker in tickers:
+    
+    prices = df[df['ticker'] == ticker]['price']
+    mad = prices.mad()
+    
+    mads.append((ticker, mad))
+    
+total_mad = sum([x[1] for x in mads])
+
+madpcts = []
+
+for info in mads:
+    
+    pct = info[1] / total_mad
+    num_shares = pct * 10000 * len(mads)
+    
+    madpcts.append((info[0], int(num_shares)))
+    
+for fin in madpcts:
+    
+    stock = stock_dat(fin[0], '2000-01-01', '2021-03-02', windows)
+    stock.execute_opt(fin[1])
+    
+    mad_balance += stock.res['total'].iloc[-1]
+    
+    print(f'\nOptima calculated for {fin[0]}: ')
+    print(f'Running balance for portfolio =    ${round(mad_balance, 2)}')
+    
+    # Update
+    mad_ledger = mad_ledger.append(stock.res)
+    
+# Coalesce
+mad_totals = mad_ledger.groupby(mpt_ledger.index)[['holdings', 'cash', 'total']].agg({'holdings': 'sum',
+                                                                                      'cash': 'sum',
+                                                                                      'total': 'sum'})
+
+# Visualize
+fig, ax = plt.subplots(figsize = (10, 6))
+plt.title('Cumulative Returns for Portfolios', fontsize = 12)
+plt.xlabel('Date', fontsize = 12)
+plt.ylabel('Cumulative Portfolio Value ($)', fontsize = 12)
+ax.plot(initial_totals['total'], lw = .5, label = 'Equally-Weighted')
+ax.plot(mpt_totals['total'], lw = .5, label = 'Markowitz')
+ax.plot(mad_totals['total'], lw = .5, label = 'MAD')
 fig.legend(loc = 'best', fontsize = 12)
