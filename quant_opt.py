@@ -139,4 +139,25 @@ for b in best:
 
     print(f'EF Allocation for {b[0]} = {round(b[1], 2)}')    
 
+# Initialize
+opt_ledger = pd.DataFrame()
+opt_balance = 0
+opt_df = pd.DataFrame()
+
+# Iterate
+for item in best:
     
+    stock = stock_dat(item[0], '2000-01-01', '2021-03-02', windows)
+    stock.execute_opt(10000 * item[1])
+    
+    opt_balance += stock.res['total'].iloc[-1]
+    
+    # Update
+    opt_ledger = opt_ledger.append(stock.res)
+    
+    opt_df = opt_df.append(stock.df)
+    
+# Coalesce
+opt_totals = opt_ledger.groupby(opt_ledger.index)[['holdings', 'cash', 'total']].agg({'holdings': 'sum',
+                                                                                      'cash': 'sum',
+                                                                                      'total': 'sum'}) 
