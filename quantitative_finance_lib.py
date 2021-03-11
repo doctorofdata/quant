@@ -17,6 +17,20 @@ warnings.filterwarnings('ignore')
 import itertools
 from operator import itemgetter
 
+# Function to get pricing
+def grab_dat(ticker, start, end):
+    
+    dat = pdr.get_data_yahoo(ticker, start, end).rename({'Adj Close': 'price'}, axis = 1)[['price']]
+        
+    dat['ticker'] = ticker
+
+    # Returns
+    dat['daily_pct_change'] = dat['price'] / dat['price'].shift(1) - 1
+    dat['daily_pct_change'].fillna(0, inplace = True)
+    dat['cum_daily_return'] = (1 + dat['daily_pct_change']).cumprod()
+        
+    return dat
+    
 '''
     Class for calculating trade activities on a given stock
     --------------------------------------------------------
@@ -29,13 +43,21 @@ from operator import itemgetter
         date
     - end:
         date
+    - windows:
+        range for MA
+    - df
+        pricing data for stock
+    - res
+        backtesting
+    - opt
+        backtesting calculated using optimal windows
         
     Methods
     =======
     - grab_dat()
     - calculate_parameters()
 '''
-
+    
 # Class for computing individual stock
 class stock_dat:
     
@@ -45,24 +67,10 @@ class stock_dat:
         self.start = start
         self.end = end
         self.windows = windows
-        self.df = self.grab_dat()
+        self.df = grab_dat(self.ticker, self.start, self.end)
         self.res = None
         self.opt = None
         self.calculate_opt()
-        
-    # Function to retrieve data
-    def grab_dat(self):
-        
-        dat = pdr.get_data_yahoo(self.ticker, self.start, self.end).rename({'Adj Close': 'price'}, axis = 1)[['price']]
-        
-        dat['ticker'] = self.ticker
-
-        # Returns
-        dat['daily_pct_change'] = dat['price'] / dat['price'].shift(1) - 1
-        dat['daily_pct_change'].fillna(0, inplace = True)
-        dat['cum_daily_return'] = (1 + dat['daily_pct_change']).cumprod()
-        
-        return dat
         
     # Function to set params
     def calculate_parameters(self, n1 = None, n2 = None):
@@ -145,4 +153,19 @@ class stock_dat:
         self.calculate_parameters(self.opt[0], self.opt[1])
         self.build_signals()
         self.execute_optimal_backtesting(amt)
+        
+    # Function to visualize prices
+    def visualize_pricing(self):
+    
+        fig, ax = plt.subplots(figsize = (10, 6))
+        ax.plot(self.df['price'], lw = .5)
+        plt.title(f'Price Over Time for {self.ticker}', fontsize = 12)
+        plt.xlabel('Date', fontsize = 12)
+        plt.ylabel('Price ($)', fontsize = 12)
 
+# Class to optimize
+class markowitz_portfolio:
+    
+    def __init__(self):
+        
+        

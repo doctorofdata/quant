@@ -12,7 +12,6 @@ os.chdir('/Users/operator/Documents/')
 from quantitative_finance_lib import *
 from quant_lib import *
 from pt_lib import *
-import xgboost as xgb
 import matplotlib.pyplot as plt
 %matplotlib inline
 %config InlineBackend.figure_format = 'retina'
@@ -56,7 +55,9 @@ tickers = ['AG',
            'RCL',
            'JWN',
            'CNK',
-           'AMC']
+           'AMC',
+           'AAL',
+           'LUV']
 
 # Define
 short_windows = [i for i in range(1, 30, 1)]
@@ -76,9 +77,6 @@ for ticker in tickers:
     
     balance += stock.res['total'].iloc[-1]
     
-    print(f'\nOptima calculated for {ticker}: ')
-    print(f'Running balance for portfolio =    ${round(balance, 2)}')
-    
     # Update
     ledger = ledger.append(stock.res)
     
@@ -93,108 +91,52 @@ initial_totals = ledger.groupby(ledger.index)[['holdings', 'cash', 'total']].agg
     Markowitz Optimization
 '''    
  
-mpt = markowitz_portfolio(df)
-weights = mpt.opt_weights
-
-# Initialize
-shares = []
-cols = [i for i in weights.columns]
-total_weight = sum([i for i in weights.iloc[0]])
-investment = 10000 * len(weights)
-
-# Iterate
-for col in cols:
-    
-    # Allocate
-    allocation = weights[col].iloc[0]
-    pct = round(allocation / total_weight, 3)
-    
-    num_shares = investment * pct
-    
-    # Update
-    shares.append((col, num_shares))
-
-# Perform adjusted backtesting
-mpt_ledger = pd.DataFrame()
-mpt_balance = 0
-
-for info in shares:
-    
-    stock = stock_dat(info[0], '2000-01-01', '2021-03-02', windows)
-    stock.execute_opt(info[1])
-    
-    mpt_balance += stock.res['total'].iloc[-1]
-    
-    print(f'\nOptima calculated for {info[0]}: ')
-    print(f'Running balance for portfolio =    ${round(mpt_balance, 2)}')
-    
-    # Update
-    mpt_ledger = mpt_ledger.append(stock.res)
-    
-# Coalesce
-mpt_totals = mpt_ledger.groupby(mpt_ledger.index)[['holdings', 'cash', 'total']].agg({'holdings': 'sum',
-                                                                                      'cash': 'sum',
-                                                                                      'total': 'sum'})
-        
-# Visualize
-fig, ax = plt.subplots(figsize = (10, 6))
-plt.title('Cumulative Returns for Portfolios', fontsize = 12)
-plt.xlabel('Date', fontsize = 12)
-plt.ylabel('Cumulative Portfolio Value ($)', fontsize = 12)
-ax.plot(initial_totals['total'], lw = .5, label = 'Equally-Weighted')
-ax.plot(mpt_totals['total'], lw = .5, label = 'Markowitz')
-fig.legend(loc = 'best', fontsize = 12)
-
-'''
-    MAD Optimization
-'''
-
-mads = []
-mad_balance = 0
-mad_ledger = pd.DataFrame()
+stocks = pd.DataFrame()
 
 for ticker in tickers:
     
-    prices = df[df['ticker'] == ticker]['price']
-    mad = prices.mad()
-    
-    mads.append((ticker, mad))
-    
-total_mad = sum([x[1] for x in mads])
+    stocks[ticker] = df[df['ticker'] == ticker]['price']
 
-madpcts = []
+logret = np.log(stocks / stocks.shift(1))
 
-for info in mads:
-    
-    pct = info[1] / total_mad
-    num_shares = pct * 10000 * len(mads)
-    
-    madpcts.append((info[0], int(num_shares)))
-    
-for fin in madpcts:
-    
-    stock = stock_dat(fin[0], '2000-01-01', '2021-03-02', windows)
-    stock.execute_opt(fin[1])
-    
-    mad_balance += stock.res['total'].iloc[-1]
-    
-    print(f'\nOptima calculated for {fin[0]}: ')
-    print(f'Running balance for portfolio =    ${round(mad_balance, 2)}')
-    
-    # Update
-    mad_ledger = mad_ledger.append(stock.res)
-    
-# Coalesce
-mad_totals = mad_ledger.groupby(mpt_ledger.index)[['holdings', 'cash', 'total']].agg({'holdings': 'sum',
-                                                                                      'cash': 'sum',
-                                                                                      'total': 'sum'})
+np.random.seed(100)
+num_ports = 10000
+all_weights = np.zeros((num_ports, len(stocks.columns)))
+ret_arr = np.zeros(num_ports)
+vol_arr = np.zeros(num_ports)
+sharpe_arr = np.zeros(num_ports)
 
-# Visualize
-fig, ax = plt.subplots(figsize = (10, 6))
-plt.title('Cumulative Returns for Portfolios', fontsize = 12)
-plt.xlabel('Date', fontsize = 12)
-plt.ylabel('Cumulative Portfolio Value ($)', fontsize = 12)
-ax.plot(initial_totals['total'], lw = .5, label = 'Equally-Weighted')
-ax.plot(mpt_totals['total'], lw = .5, label = 'Markowitz')
-ax.plot(mad_totals['total'], lw = .5, label = 'MAD')
-fig.legend(loc = 'best', fontsize = 12)
+for x in range(num_ports):
+    
+    # Weights
+    weights = np.array(np.random.random(len(stocks.columns)))
+    weights = weights/np.sum(weights)
+    
+    # Save weights
+    all_weights[x, :] = weights
+    
+    # Expected return
+    ret_arr[x] = np.sum( (logret.mean() * weights * 252))
+    
+    # Expected volatility
+    vol_arr[x] = np.sqrt(np.dot(weights.T, np.dot(logret.cov() * 252, weights)))
+    
+    # Sharpe Ratio
+    sharpe_arr[x] = ret_arr[x] / vol_arr[x]
+    
+# Get best result
+print(f'Location of Best Allocation- {sharpe_arr.argmax()}')
+
+best = []
+   
+for x, y in zip(stocks.columns, all_weights[sharpe_arr.argmax()]):
+
+    if round(y, 2) != 0:
+        
+        best.append((x, y))
+
+for b in best:
+
+    print(f'EF Allocation for {b[0]} = {round(b[1], 2)}')    
+
+    
