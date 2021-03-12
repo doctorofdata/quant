@@ -164,8 +164,6 @@ class stock_dat:
         plt.ylabel('Price ($)', fontsize = 12)
 
 # Class to optimize
-class markowitz_portfolio:
-    
-    def __init__(self):
+
         
         
