@@ -7,6 +7,9 @@ Created on Fri Oct  7 08:08:16 2022
 """
 
 # Import libraries
+import tqdm
+import os
+os.chdir('/home/dataguy/Documents/')
 import pandas as pd
 import pandas_datareader as pdr
 import time
@@ -15,21 +18,23 @@ import numpy as np
 import itertools
 from operator import itemgetter
 import matplotlib.pyplot as plt
+import warnings
+warnings.filterwarnings('ignore')
+
+# Init
+num_cpu = cpu_count()
 
 # Read tickers
 table = pd.read_html('https://en.wikipedia.org/wiki/List_of_S%26P_500_companies')
 tickers = table[0]
 symbols = tickers['Symbol'].unique()
 
-# Init
-num_cpu = cpu_count()
-
 # Function to get price
 def get_ticker_data(symbol):
     
     try:
     
-        data = pdr.get_data_yahoo(symbol, '2020-01-01', '2022-10-13').rename({'Adj Close': 'price'}, axis = 1)[['price']]
+        data = pdr.get_data_yahoo(symbol, '2000-01-01', '2022-10-13').rename({'Adj Close': 'price'}, axis = 1)[['price']]
 
         # Calculate
         data['ticker'] = symbol
@@ -44,83 +49,119 @@ def get_ticker_data(symbol):
     except:
     
         return None
-    
-# Function to set params
-def calculate_parameters(df, n1 = None, n2 = None):
-    
-    if n1 is not None:
-        
-        df['short'] = df['price'].rolling(n1).mean()
-        
-    if n2 is not None:
-        
-        df['long'] = df['price'].rolling(n2).mean()
 
-# Function to perform backtesting
-def perform_backtesting(nm):
+# Function to compute annual performance
+def compute_portfolio_annual_performance(weights, returns, cov_mat):
     
-    grp = df2.loc[df2['ticker'] == nm]
+    return np.sqrt(np.dot(weights.T, np.dot(cov_mat, weights))) * np.sqrt(250), np.sum(returns * weights) * 250
+
+# Function to compute returns
+def random_portfolii(num_assets, num, returns, cov_mat, rate):
     
-    positions[nm] = 1000 * grp['signal'] 
+    result = np.zeros((3, num))
+    weights_rec = []
+    
+    for n in range(num):
+        
+        weights = np.random.random(num_assets)
+        weights /= np.sum(weights)
+        weights_rec.append(weights)
+        
+        pstd, pret = compute_portfolio_annual_performance(weights, returns, cov_mat)
+        
+        result[0, n] = pstd
+        result[1, n] = pret
+        result[2, n] = (pret - rate) / pstd
+        
+    return result, weights_rec
+
+# Function to backtest
+def get_backtesting_results(symbol):
+    
+    grp = df1[df1['ticker'] == symbol]
+    
+    # Calculation
+    positions = pd.DataFrame(index = grp.index).fillna(0.0)
+    positions[symbol] = 1000 * grp['signal'] 
+
+    port = positions.multiply(grp['price'], axis = 0)
+    pos_diff = positions.diff()
+
+    # Computation
+    port['holdings'] = (positions.multiply(grp['price'], axis = 0)).sum(axis = 1)
+    port['cash'] = 10000 - (pos_diff.multiply(grp['price'], axis = 0)).sum(axis = 1).cumsum()   
+    port['total'] = port['cash'] + port['holdings']
+    
+    return port
+
+# Function to compute portfolio report
+def display_simulated_allocation_report(returns, cov_mat, num, rate):
+    
+    results, weights = random_portfolii(len(returns), num, returns, cov_mat, rate)
+    
+    max_sharpe_idx = np.argmax(results[2])
+    sdp, rp = results[0, max_sharpe_idx], results[1, max_sharpe_idx]
+    max_sharpe_allocation = pd.DataFrame(weights[max_sharpe_idx], index = stocks.columns, columns = ['allocation'])
+    max_sharpe_allocation.allocation = [round(i * 100,2)for i in max_sharpe_allocation.allocation]
+    max_sharpe_allocation = max_sharpe_allocation.T
+    
+    min_vol_idx = np.argmin(results[0])
+    sdp_min, rp_min = results[0,min_vol_idx], results[1,min_vol_idx]
+    min_vol_allocation = pd.DataFrame(weights[min_vol_idx], index = stocks.columns,columns = ['allocation'])
+    min_vol_allocation.allocation = [round(i * 100,2)for i in min_vol_allocation.allocation]
+    min_vol_allocation = min_vol_allocation.T
+    
+    print("-"*80)
+    print("Maximum Sharpe Ratio Portfolio Allocation\n")
+    print("Annualised Return:", round(rp,2))
+    print("Annualised Volatility:", round(sdp,2))
+    print()
+    print(max_sharpe_allocation)
+    print("-"*80)
+    print("Minimum Volatility Portfolio Allocation\n")
+    print("Annualised Return:", round(rp_min,2))
+    print("Annualised Volatility:", round(sdp_min,2))
+    print()
+    print(min_vol_allocation)
+    
+    plt.figure(figsize = (10, 7))
+    plt.scatter(results[0,:],results[1,:],c=results[2,:], cmap = 'YlGnBu', marker = 'o', s = 10, alpha = 0.3)
+    plt.colorbar()
+    plt.scatter(sdp,rp,marker = '*', color = 'r', s = 500, label = 'Maximum Sharpe ratio')
+    plt.scatter(sdp_min, rp_min, marker = '*', color = 'g', s = 500, label = 'Minimum volatility')
+    plt.title('Simulated Portfolio Optimization based on Efficient Frontier')
+    plt.xlabel('annualised volatility')
+    plt.ylabel('annualised returns')
+    plt.legend(labelspacing = 0.8)
+    
+    return max_sharpe_allocation
+
+# Function to compute investment sizing
+def optimized_backtesting(allocation):
+
+    grp = df1[df1['ticker'] == allocation[0]]
+    
+    positions = pd.DataFrame(index = grp.index).fillna(0.0)
+    positions[allocation[0]] = (num_shares * allocation[1]) * grp['signal'] 
 
     port = positions.multiply(grp['price'], axis = 0)
     pos_diff = positions.diff()
 
     # Add `holdings` to portfolio
     port['holdings'] = (positions.multiply(grp['price'], axis = 0)).sum(axis = 1)
-    
+
     # Add `cash` to portfolio
-    port['cash'] = 10000 - (pos_diff.multiply(grp['price'], axis = 0)).sum(axis = 1).cumsum()   
+    port['cash'] = (total_cash * allocation[1]) - (pos_diff.multiply(grp['price'], axis = 0)).sum(axis = 1).cumsum()   
 
     # Add `total` to portfolio
     port['total'] = port['cash'] + port['holdings']
-    
+
     # Add `returns` to portfolio
     port['returns'] = port['total'].pct_change() 
     
-    port['ticker'] = nm
-        
-    return port
-
-# Function to perfortm optimization of trading windows
-def retrieve_optimized_parameters(symbol):
-
-    score = []
+    port['ticker'] = allocation[0]
     
-    # Execute strategy for optimizing windows
-    data = df[df['ticker'] == symbol]
-    
-    # Backtest windows
-    for window in windows:
-        
-        calculate_parameters(data, window[0], window[1])
-        
-        # Calculate
-        data['signal'] = 0
-        data['signal'][window[0]:] = np.where(data['short'][window[0]:] > data['long'][window[0]:], 1.0, 0.0)   
-        data['positions'] = data['signal'].diff()
-        
-        positions = pd.DataFrame(index = data.index).fillna(0.0)
-        positions[nm] = 1000 * data['signal'] 
-
-        port = positions.multiply(data['price'], axis = 0)
-        pos_diff = positions.diff()
-
-        port['holdings'] = (positions.multiply(data['price'], axis = 0)).sum(axis = 1)
-        port['cash'] = 10000 - (pos_diff.multiply(data['price'], axis = 0)).sum(axis = 1).cumsum()   
-        port['total'] = port['cash'] + port['holdings']
-        
-        # Update ticker
-        score.append((window, port['total'].iloc[-1]))
-        
-    # Get max
-    best = max(score, key = itemgetter(1))[0] 
-    
-    return symbol, best
-
-'''
-    S&P 500 - Initial
-'''
+    return port.drop(allocation[0], axis = 1)
 
 # Iterate tickers to retrieve prices
 start = time.time()
@@ -129,12 +170,11 @@ result = pool.map(get_ticker_data, symbols)
 df = pd.concat([i for i in result])  
 end = time.time()
 print(f'Elapsed data retrieval time: {round((end - start)/60, 2)} minutes..')
-
+    
 # Calculate trades
-df1 = df.dropna()
-df2 = pd.DataFrame()
+df1 = pd.DataFrame()
 
-for nm, grp in df1.groupby('ticker'):
+for nm, grp in df.groupby('ticker'):
     
     try:
         
@@ -142,187 +182,190 @@ for nm, grp in df1.groupby('ticker'):
         grp['signal'][30:] = np.where(grp['short'][30:] > grp['long'][30:], 1.0, 0.0)   
         grp['positions'] = grp['signal'].diff()
     
-        df2 = df2.append(grp)
+        df1 = df1.append(grp)
         
     except:
         
         print(f'Error for {nm}..')
 
-# Backtesting
-portfolio = pd.DataFrame()
-
-for nm, grp in df2.groupby('ticker'):
-    
-    positions = pd.DataFrame(index = grp.index).fillna(0.0)
-    positions[nm] = 1000 * grp['signal'] 
-
-    port = positions.multiply(grp['price'], axis = 0)
-    pos_diff = positions.diff()
-
-    # Add `holdings` to portfolio
-    port['holdings'] = (positions.multiply(grp['price'], axis = 0)).sum(axis = 1)
-
-    # Add `cash` to portfolio
-    port['cash'] = 10000 - (pos_diff.multiply(grp['price'], axis = 0)).sum(axis = 1).cumsum()   
-
-    # Add `total` to portfolio
-    port['total'] = port['cash'] + port['holdings']
-
-    # Add `returns` to portfolio
-    port['returns'] = port['total'].pct_change() 
-    
-    port['ticker'] = nm
-    
-    portfolio = portfolio.append(port)
-
-# Sum daily returns
-agg_portfolio = portfolio.groupby(portfolio.index)['holdings', 'cash', 'total'].agg({'holdings': 'sum',
-                                                                                     'cash': 'sum',
-                                                                                     'total': 'sum'}, axis = 1)
-
-# Evaluate
-print(f"Portfolio starting cash:  ${agg_portfolio['total'].iloc[0]}")
-print(f"Portfolio ending cash:    ${round(agg_portfolio['total'].iloc[-1])}")
-print(f"Portfolio overall returns: {round((agg_portfolio['total'].iloc[-1]/agg_portfolio['total'].iloc[0]))}X")
-
-'''
-    S&P 500 - Optimized
-'''
-
-# Create optmization parameters
-short_windows = [i for i in range(1, 60, 3)]
-long_windows = [i for i in range(90, 180, 3)]
-windows = [i for i in itertools.product(*[short_windows, long_windows])]
-df3 = pd.DataFrame()
-
-# Iterate tickers to retrieve optimal windows
+# Iterate tickers to coduct backtest
 start = time.time()
 pool = Pool(num_cpu - 1)
-result = pool.map(retrieve_optimized_parameters, df['ticker'].unique())    
+backtest = pool.map(get_backtesting_results, symbols)
 end = time.time()
-print(f'Elapsed parameter calculation time: {round((end - start)/60, 2)} minutes..')
+print(f'Elapsed backtesting time: {round((end - start), 2)} seconds..')
 
-# Calculate ledgers based on optimized parameters
-for item in result:
-    
-    data = df[df['ticker'] == item[0]]
-    
-    data['short'] = data['price'].rolling(item[1][0]).mean()
-    data['long'] = data['price'].rolling(item[1][1]).mean()
-    
-    df3 = df3.append(data)
+# Combine result from each stock
+totals = pd.DataFrame()
+signals = pd.DataFrame()
+backtesting = pd.DataFrame()
 
-# Backtest optimized rolling averages 
-df4 = pd.DataFrame()
-   
-for item in result:
+for x, y in zip(symbols, backtest):
     
-    grp = df3[df3['ticker'] == item[0]]
+    signals[x] = y[x] 
     
-    try:
+    z = y.drop(x, axis = 1)
+    z['ticker'] = x
+    
+    backtesting = backtesting.append(z)
+    
+    totals = totals.add(y[['holdings', 'cash', 'total']], fill_value = 0)
+    
+final = totals.merge(signals, left_index = True, right_index = True)
+
+# Visualize
+plt.figure(figsize = (50, 20))
+plt.plot(final['total'])
+plt.title('30-Day/90-Day Short Trading for S&P 500: 2000 - 2022', fontsize = 24)
+plt.xlabel('Date', fontsize = 14)
+plt.ylabel('Total Portfolio $ (Million)', fontsize = 14)
         
-        grp['signal'] = 0
-        grp['signal'][item[1][0]:] = np.where(grp['short'][item[1][0]:] > grp['long'][item[1][0]:], 1.0, 0.0)   
-        grp['positions'] = grp['signal'].diff()
+'''
+    Efficient Frontier
+'''
+
+# Build df
+stocks = pd.DataFrame()
+
+for nm, grp in df1.groupby('ticker'):
     
-        df4 = df4.append(grp)
-        
-    except:
-        
-        print(f'Error for {nm}..')
+    stocks[nm] = grp['price']
 
-# Backtesting
-opt_portfolio = pd.DataFrame()
+# Generate portfolii
+returns = stocks.pct_change()
+meanreturns = returns.mean()
+cov_mat = returns.cov()
 
-for nm, grp in df4.groupby('ticker'):
+# Get optima
+optima = display_simulated_allocation_report(meanreturns, cov_mat, 100000, .02)
+assets = optima.columns
+allocations = []
+
+for asset in optima.columns:
     
-    positions = pd.DataFrame(index = grp.index).fillna(0.0)
-    positions[nm] = 1000 * grp['signal'] 
+    if optima[asset]['allocation'] > 0:
+        
+        print(f"Asset: {asset}, allocation = {optima[asset]['allocation']}")
+        
+        allocations.append((asset, optima[asset]['allocation']))
 
-    port = positions.multiply(grp['price'], axis = 0)
+# Inidivudally iterate to determine allocations
+starting_cash = 10000 * 503
+total_shares = 1000 * 503
+frontier = pd.DataFrame()
+
+# Iterate efficient frontier to calculate new totals       
+for item in tqdm.tqdm(allocations):
+    
+    data = df1[df1['ticker'] == item[0]]
+    
+    positions = pd.DataFrame(index = data.index).fillna(0.0)
+    positions[nm] = 1000 * 503 * item[1] * data['signal'] 
+
+    port = positions.multiply(data['price'], axis = 0)
     pos_diff = positions.diff()
 
-    # Add `holdings` to portfolio
-    port['holdings'] = (positions.multiply(grp['price'], axis = 0)).sum(axis = 1)
-
-    # Add `cash` to portfolio
-    port['cash'] = 10000 - (pos_diff.multiply(grp['price'], axis = 0)).sum(axis = 1).cumsum()   
-
-    # Add `total` to portfolio
+    # Compute assets
+    port['holdings'] = (positions.multiply(data['price'], axis = 0)).sum(axis = 1)
+    port['cash'] = 10000 - (pos_diff.multiply(data['price'], axis = 0)).sum(axis = 1).cumsum()   
     port['total'] = port['cash'] + port['holdings']
-
-    # Add `returns` to portfolio
     port['returns'] = port['total'].pct_change() 
+    port['ticker'] = item[0]
     
-    port['ticker'] = nm
+    frontier = frontier.append(port)
     
-    opt_portfolio = opt_portfolio.append(port)
+# Aggregate portfolio returns
+efficientfrontier = frontier.groupby(frontier.index)['holdings', 'cash', 'total'].agg({'holdings': 'sum',
+                                                                                       'cash': 'sum',
+                                                                                       'total': 'sum'}, axis = 1)
 
-# Sum daily returns
-agg_opt_portfolio = opt_portfolio.groupby(opt_portfolio.index)['holdings', 'cash', 'total'].agg({'holdings': 'sum',
-                                                                                                 'cash': 'sum',
-                                                                                                 'total': 'sum'}, axis = 1)
+# Visualize
+plt.figure(figsize = (50, 20))
+plt.plot(efficientfrontier['total'], label = 'Efficient Frontier')
+plt.plot(final['total'], label = 'Baseline Trading')
+plt.title('Efficient Frontier 30-Day/90-Day Short Trading for S&P 500: 2000 - 2022', fontsize = 24)
+plt.xlabel('Date', fontsize = 14)
+plt.ylabel('Total Portfolio $ (Million)', fontsize = 14)
 
 # Evaluate
-print(f"Portfolio starting cash:  ${agg_opt_portfolio['total'].iloc[0]}")
-print(f"Portfolio ending cash:    ${round(agg_opt_portfolio['total'].iloc[-1])}")
-print(f"Portfolio overall returns: {round((agg_opt_portfolio['total'].iloc[-1]/agg_opt_portfolio['total'].iloc[0]))}X")
-
-'''
-    Trade Analysis
-'''
-
-# Visualize
-plt.figure(figsize = (50, 20))
-plt.plot(agg_portfolio['total'])
-plt.title('Short/Long Trading for S&P 500: 2020 - 2022', fontsize = 24)
-plt.xlabel('Date', fontsize = 14)
-plt.ylabel('Total Portfolio $ (Million)', fontsize = 14)
-
-# Visualize
-plt.figure(figsize = (50, 20))
-plt.plot(agg_opt_portfolio['total'])
-plt.title('Optimized Short/Long Trading for S&P 500: 2020 - 2022', fontsize = 24)
-plt.xlabel('Date', fontsize = 14)
-plt.ylabel('Total Portfolio $ (Million)', fontsize = 14)
+print(f"Efficient Frontier Portfolio starting cash:  ${efficientfrontier['total'].iloc[0]}")
+print(f"Efficient Frontier Portfolio ending cash:    ${round(efficientfrontier['total'].iloc[-1])}")
+print(f"Efficient Frontier overall returns: {round((efficientfrontier['total'].iloc[-1]/efficientfrontier['total'].iloc[0]))}X")
 
 # Tabulate categories
 tickers.groupby(['GICS Sector', 'GICS Sub-Industry']).size().reset_index(name = 'count').sort_values('count', ascending = False)
 tickers['category'] = tickers['GICS Sector'] + ' / ' + tickers['GICS Sub-Industry']
 
-# Merge categories
-categorical_opt_portfolio = opt_portfolio.reset_index().merge(tickers[['Symbol', 'category']], how = 'left', right_on = 'Symbol', left_on = 'ticker').drop('Symbol', axis = 1)
-categorical_opt_portfolio.index = pd.DatetimeIndex(categorical_opt_portfolio['Date'])
-categorical_opt_portfolio.drop('Date', axis = 1, inplace = True)
-categorical_opt_portfolio = categorical_opt_portfolio.groupby([categorical_opt_portfolio.category, categorical_opt_portfolio.index])['holdings', 'cash', 'total'].agg({'holdings': 'sum',
-                                                                                                                                                                       'cash': 'sum',
-                                                                                                                                                                       'total': 'sum'}, axis = 1).reset_index()
+# Coalesce results by sector
+sector_totals = pd.DataFrame()
 
-# Analyze
-analysis = pd.DataFrame()
+for nm, grp in tickers.groupby('category'): 
+    
+    print(nm)
+    
+    total = pd.DataFrame()
+    
+    for ticker in grp['Symbol'].unique():
+        
+        total = total.add(frontier[frontier['ticker'] == ticker][['holdings', 'cash', 'total']], fill_value = 0)
+        
+    total['category'] = nm
+    
+    sector_totals = sector_totals.append(total)
 
-for nm, grp in categorical_opt_portfolio.groupby('category'):
+sector_stats = pd.DataFrame()
     
-    print(f'Showing Results for {nm}: ')
+for nm, grp in sector_totals.groupby('category'):
     
-    sizing = len(tickers[tickers['category'] == nm])
-    start = int(grp['total'].iloc[0])
-    finish = int(grp['total'].iloc[-1])
-    overall = finish / start
+    sector_stats = sector_stats.append({'category': nm,
+                                        'start_dt': min(grp.index.date),
+                                        'end_dt': max(grp.index.date),
+                                        'time_in_years': round((max(grp.index.date) - min(grp.index.date)).days/365, 3),
+                                        'total_size': tickers[tickers['category'] == nm].size,
+                                        'start_investment': tickers[tickers['category'] == nm].size * 10000,
+                                        'end_investment': round(grp['total'].iloc[-1], 2),
+                                        'overall_return': round(grp['total'].iloc[-1], 2) / (tickers[tickers['category'] == nm].size * 10000)}, ignore_index = True)
     
-    print(f'Size of Sector- {sizing}')
-    print(f"Start Investment: ${start}")
-    print(f"Ending Balance: ${finish}")
-    print(f"Overall Return for Sector- {overall}")
+    print(f'Analysis for {nm}: ')
+    print(f'Investment Start Date: {min(grp.index.date)}')
+    print(f'Total Length of Investment: {round((max(grp.index.date) - min(grp.index.date)).days/365, 3)} years')
+    print(f"Num. Companies: {tickers[tickers['category'] == nm].size}")
+    print(f"Starting Investment: ${tickers[tickers['category'] == nm].size * 10000}")
+    print(f"Ending Investment:   ${round(grp['total'].iloc[-1], 2)}")
+    print(f"Overall Returns for Sector: {round(grp['total'].iloc[-1] / (tickers[tickers['category'] == nm].size * 10000), 3)}X")
     print()
-    
-    analysis = analysis.append({'category': nm,
-                                'size': sizing,
-                                'investment': start,
-                                'end_balance': finish,
-                                'return': overall}, ignore_index = True)
 
-print('Performance Report by Sector for S&P500: 2020 - 2022')
-for idx, row in analysis.sort_values('return', ascending = False).iterrows():
+bad_co = 0
+good_co = 0
+
+for idx, row in sector_stats.sort_values('overall_return').iterrows():
     
-    print(f"{row['category']} - ${row['end_balance']} - {round(row['return'], 2)}X")
+    if row['overall_return'] <= 1:
+        
+        pass
+    
+        # print(f"Bad Investment Category: {row['category']}")
+        # print(f"Related Companies:")
+        # print(', '.join([i for i in tickers[tickers['category'] == row['category']]['Symbol']]))
+        
+        # for i in tickers[tickers['category'] == row['category']]['Symbol']:
+            
+        #     bad_co += 1
+            
+        # print()
+        
+    else:
+        
+        print(f"Analysis for {row['category']}: ")
+        print(f"Investment Start Date: {row['start_dt']}")
+        print(f"Total Length of Investment: {row['time_in_years']} years")
+        print(f"Size of Sector Portfolio- {tickers[tickers['category'] == row['category']]['Symbol'].count()} companies")
+        print(f"Related Companies: {', '.join([i for i in tickers[tickers['category'] == row['category']]['Symbol']])}")
+        print(f"Overall Return on Investment: {round(sector_totals[sector_totals['category'] == row['category']]['total'].iloc[-1] / sector_totals[sector_totals['category'] == row['category']]['total'].iloc[0], 3)}X")
+        
+        for i in tickers[tickers['category'] == row['category']]['Symbol']:
+
+            good_co += 1
+            
+        print()  
+        
